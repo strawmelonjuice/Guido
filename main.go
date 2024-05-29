@@ -1,3 +1,6 @@
+/*
+Guido.Go By Strawmelonjuice
+*/
 package main
 
 import (
@@ -6,20 +9,17 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/Goscord/goscord/goscord"
-	"github.com/Goscord/goscord/goscord/discord"
-	"github.com/Goscord/goscord/goscord/gateway"
-	"github.com/Goscord/goscord/goscord/gateway/event"
+	"github.com/bwmarrin/discordgo"
 )
-
-var client *gateway.Session
 
 type botConfig struct {
 	Nickname string
 }
 
-type Configuration struct {
+type GuidoConfiguration struct {
 	Token         string
 	Bot           botConfig
 	configVersion int32
@@ -57,7 +57,7 @@ func main() {
 		fmt.Println("error:", configOpenError)
 	}
 	decoder := json.NewDecoder(file)
-	configuration := Configuration{}
+	configuration := GuidoConfiguration{}
 
 	err := decoder.Decode(&configuration)
 	if err != nil {
@@ -68,26 +68,33 @@ func main() {
 		consoleError.Fatal("Please set your Discord auth Token in the '" + configFileLocation + "' file.")
 	}
 	fmt.Println("Starting Guido...")
+	discord, err := discordgo.New("Bot " + configuration.Token)
+	if err != nil {
+		fmt.Println("error creating Discord session,", err)
+		return
+	}
+	// Register the messageCreate func as a callback for MessageCreate events.
+	discord.AddHandler(messageCreate)
 
-	client := goscord.New(&gateway.Options{
-		Token:   configuration.Token,
-		Intents: gateway.IntentGuildMessages,
-	})
+	// In this example, we only care about receiving message events.
+	discord.Identify.Intents = discordgo.IntentsGuildMessages
 
-	_ = client.On(event.EventReady, func() {
-		fmt.Println("Logged in as " + client.Me().Tag())
-	})
-
-	_ = client.On(event.EventMessageCreate, func(msg *discord.Message) {
-		if msg.Content == "ping" {
-			message, _ := client.Channel.SendMessage(msg.ChannelId, "Pong ! 🏓")
-			consoleLog.Println("Send message: ", message)
-		}
-	})
-
-	if client.Login() != nil {
-		consoleError.Fatal("Guido could not log in to Discord. Are you sure your Token is correct?")
+	// Open a websocket connection to Discord and begin listening.
+	err = discord.Open()
+	if err != nil {
+		fmt.Println("error opening connection,", err)
+		return
 	}
 
-	select {}
+	// Wait here until CTRL-C or other term signal is received.
+	fmt.Println("Guido is now running.  Press CTRL-C to exit.")
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
+	<-sc
+
+	// Cleanly close down the Discord session.
+	err = discord.Close()
+	if err != nil {
+		return
+	}
 }
